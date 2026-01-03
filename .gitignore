@@ -2,6 +2,7 @@
 *.tmp
 *.log
 .DS_Store
+wget-log*
 
 # Test artifacts
 test_downloads/
