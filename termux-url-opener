@@ -59,7 +59,7 @@ case "$URL" in
         
         # Ask user for quality preference
         if command_exists "termux-dialog"; then
-            QUALITY=$(termux-dialog radio -v "Select quality:" -t "YouTube Download" \
+            QUALITY=$(termux-dialog radio -t "YouTube Download" \
                 -v "Best quality (video+audio),Audio only (mp3),720p,480p,360p")
             
             case "$QUALITY" in
@@ -106,13 +106,21 @@ case "$URL" in
         
         if [ -d "$CLONE_DIR" ]; then
             notify "Repository already exists. Pulling updates..."
-            cd "$CLONE_DIR" && git pull
+            if cd "$CLONE_DIR" && git pull; then
+                notify "Repository updated successfully at: $CLONE_DIR"
+            else
+                notify "Failed to update repository"
+                exit 1
+            fi
         else
             notify "Cloning repository..."
-            git clone "$URL" "$CLONE_DIR"
+            if git clone "$URL" "$CLONE_DIR"; then
+                notify "Repository cloned successfully at: $CLONE_DIR"
+            else
+                notify "Failed to clone repository"
+                exit 1
+            fi
         fi
-        
-        notify "Repository ready at: $CLONE_DIR"
         ;;
     
     # Image URLs
@@ -204,7 +212,7 @@ case "$URL" in
                 EXTRACT=$(termux-dialog confirm -t "Extract Archive?" \
                     -i "Do you want to extract the archive?")
                 
-                if [[ "$EXTRACT" == *"yes"* ]]; then
+                if [[ "$EXTRACT" =~ ^yes$ ]] || [[ "$EXTRACT" =~ \"text\":\"yes\" ]]; then
                     cd "$DOWNLOAD_DIR" || exit 1
                     
                     case "$ARCHIVE_NAME" in
@@ -255,8 +263,10 @@ case "$URL" in
         
         # Try to determine if it's a downloadable file by checking headers
         if command_exists "curl"; then
-            CONTENT_TYPE=$(curl -sI "$URL" | grep -i "content-type" | awk '{print $2}')
-            CONTENT_DISPOSITION=$(curl -sI "$URL" | grep -i "content-disposition")
+            # Fetch headers once and store them
+            HEADERS=$(curl -sI "$URL")
+            CONTENT_TYPE=$(echo "$HEADERS" | grep -i "content-type" | awk '{print $2}')
+            CONTENT_DISPOSITION=$(echo "$HEADERS" | grep -i "content-disposition")
             
             # If content-disposition suggests download or content-type is not HTML
             if [[ -n "$CONTENT_DISPOSITION" ]] || [[ "$CONTENT_TYPE" != *"text/html"* ]]; then

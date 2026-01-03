@@ -14,10 +14,10 @@ if [ ! -d "/data/data/com.termux" ]; then
 fi
 
 echo "📋 Creating necessary directories..."
-mkdir -p ~/.termux/bin
-mkdir -p ~/repositories
-mkdir -p ~/storage/downloads 2>/dev/null
-mkdir -p ~/storage/pictures 2>/dev/null
+mkdir -p ~/.termux/bin || { echo "❌ Failed to create ~/.termux/bin"; exit 1; }
+mkdir -p ~/repositories || { echo "❌ Failed to create ~/repositories"; exit 1; }
+mkdir -p ~/storage/downloads 2>/dev/null || true
+mkdir -p ~/storage/pictures 2>/dev/null || true
 
 echo "📦 Copying termux-url-opener script..."
 if [ -f "termux-url-opener" ]; then
