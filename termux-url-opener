@@ -1,0 +1,313 @@
+#!/data/data/com.termux/files/usr/bin/bash
+
+# Termux URL Opener - Smart URL Handler
+# This script intelligently handles different types of URLs shared to Termux
+
+URL="$1"
+
+# Function to show notifications
+notify() {
+    if command -v termux-notification &> /dev/null; then
+        termux-notification --title "URL Opener" --content "$1"
+    fi
+    echo "$1"
+}
+
+# Function to check if a command exists
+command_exists() {
+    command -v "$1" &> /dev/null
+}
+
+# Function to install missing packages
+install_package() {
+    local package="$1"
+    notify "Installing $package..."
+    pkg install -y "$package"
+}
+
+# Function to ensure required tools are installed
+ensure_tool() {
+    local tool="$1"
+    local package="${2:-$tool}"
+    
+    if ! command_exists "$tool"; then
+        notify "$tool not found. Installing $package..."
+        install_package "$package"
+    fi
+}
+
+# Validate URL input
+if [ -z "$URL" ]; then
+    notify "Error: No URL provided"
+    exit 1
+fi
+
+notify "Processing URL: $URL"
+
+# Handle different URL types
+case "$URL" in
+    # YouTube URLs
+    *youtube.com/watch?*|*youtu.be/*|*youtube.com/shorts/*|*youtube.com/playlist?*)
+        notify "YouTube video detected"
+        ensure_tool "yt-dlp" "yt-dlp"
+        
+        # Create downloads directory if it doesn't exist
+        DOWNLOAD_DIR="$HOME/storage/downloads"
+        mkdir -p "$DOWNLOAD_DIR"
+        
+        cd "$DOWNLOAD_DIR" || exit 1
+        
+        # Ask user for quality preference
+        if command_exists "termux-dialog"; then
+            QUALITY=$(termux-dialog radio -v "Select quality:" -t "YouTube Download" \
+                -v "Best quality (video+audio),Audio only (mp3),720p,480p,360p")
+            
+            case "$QUALITY" in
+                *"Audio only"*)
+                    notify "Downloading audio..."
+                    yt-dlp -x --audio-format mp3 "$URL"
+                    ;;
+                *"720p"*)
+                    notify "Downloading 720p..."
+                    yt-dlp -f "bestvideo[height<=720]+bestaudio/best[height<=720]" "$URL"
+                    ;;
+                *"480p"*)
+                    notify "Downloading 480p..."
+                    yt-dlp -f "bestvideo[height<=480]+bestaudio/best[height<=480]" "$URL"
+                    ;;
+                *"360p"*)
+                    notify "Downloading 360p..."
+                    yt-dlp -f "bestvideo[height<=360]+bestaudio/best[height<=360]" "$URL"
+                    ;;
+                *)
+                    notify "Downloading best quality..."
+                    yt-dlp -f "bestvideo+bestaudio/best" "$URL"
+                    ;;
+            esac
+        else
+            # Default: download best quality
+            notify "Downloading best quality..."
+            yt-dlp -f "bestvideo+bestaudio/best" "$URL"
+        fi
+        
+        notify "Download complete!"
+        ;;
+    
+    # Git repository URLs
+    *github.com/*|*gitlab.com/*|*bitbucket.org/*|*.git)
+        notify "Git repository detected"
+        ensure_tool "git" "git"
+        
+        # Extract repository name
+        REPO_NAME=$(basename "$URL" .git)
+        CLONE_DIR="$HOME/repositories/$REPO_NAME"
+        
+        mkdir -p "$HOME/repositories"
+        
+        if [ -d "$CLONE_DIR" ]; then
+            notify "Repository already exists. Pulling updates..."
+            cd "$CLONE_DIR" && git pull
+        else
+            notify "Cloning repository..."
+            git clone "$URL" "$CLONE_DIR"
+        fi
+        
+        notify "Repository ready at: $CLONE_DIR"
+        ;;
+    
+    # Image URLs
+    *.jpg|*.jpeg|*.png|*.gif|*.webp|*.bmp|*.svg)
+        notify "Image detected"
+        ensure_tool "wget" "wget"
+        
+        DOWNLOAD_DIR="$HOME/storage/pictures"
+        mkdir -p "$DOWNLOAD_DIR"
+        
+        IMAGE_NAME=$(basename "$URL")
+        DOWNLOAD_PATH="$DOWNLOAD_DIR/$IMAGE_NAME"
+        
+        notify "Downloading image..."
+        wget -O "$DOWNLOAD_PATH" "$URL"
+        
+        if [ -f "$DOWNLOAD_PATH" ]; then
+            notify "Image saved to: $DOWNLOAD_PATH"
+            
+            # Try to open with termux-open or display with termux-media-player
+            if command_exists "termux-open"; then
+                termux-open "$DOWNLOAD_PATH"
+            fi
+        else
+            notify "Failed to download image"
+        fi
+        ;;
+    
+    # Magnet links and torrent files
+    magnet:*|*.torrent)
+        notify "Torrent/Magnet link detected"
+        ensure_tool "aria2c" "aria2"
+        
+        DOWNLOAD_DIR="$HOME/storage/downloads"
+        mkdir -p "$DOWNLOAD_DIR"
+        
+        cd "$DOWNLOAD_DIR" || exit 1
+        
+        notify "Starting download with aria2c..."
+        aria2c "$URL"
+        
+        notify "Download complete!"
+        ;;
+    
+    # PDF files
+    *.pdf)
+        notify "PDF file detected"
+        ensure_tool "wget" "wget"
+        
+        DOWNLOAD_DIR="$HOME/storage/downloads"
+        mkdir -p "$DOWNLOAD_DIR"
+        
+        PDF_NAME=$(basename "$URL")
+        DOWNLOAD_PATH="$DOWNLOAD_DIR/$PDF_NAME"
+        
+        notify "Downloading PDF..."
+        wget -O "$DOWNLOAD_PATH" "$URL"
+        
+        if [ -f "$DOWNLOAD_PATH" ]; then
+            notify "PDF saved to: $DOWNLOAD_PATH"
+            
+            if command_exists "termux-open"; then
+                termux-open "$DOWNLOAD_PATH"
+            fi
+        else
+            notify "Failed to download PDF"
+        fi
+        ;;
+    
+    # Archive files
+    *.zip|*.tar|*.tar.gz|*.tgz|*.tar.bz2|*.rar|*.7z)
+        notify "Archive file detected"
+        ensure_tool "wget" "wget"
+        
+        DOWNLOAD_DIR="$HOME/storage/downloads"
+        mkdir -p "$DOWNLOAD_DIR"
+        
+        ARCHIVE_NAME=$(basename "$URL")
+        DOWNLOAD_PATH="$DOWNLOAD_DIR/$ARCHIVE_NAME"
+        
+        notify "Downloading archive..."
+        wget -O "$DOWNLOAD_PATH" "$URL"
+        
+        if [ -f "$DOWNLOAD_PATH" ]; then
+            notify "Archive saved to: $DOWNLOAD_PATH"
+            
+            # Ask if user wants to extract
+            if command_exists "termux-dialog"; then
+                EXTRACT=$(termux-dialog confirm -t "Extract Archive?" \
+                    -i "Do you want to extract the archive?")
+                
+                if [[ "$EXTRACT" == *"yes"* ]]; then
+                    cd "$DOWNLOAD_DIR" || exit 1
+                    
+                    case "$ARCHIVE_NAME" in
+                        *.zip)
+                            ensure_tool "unzip" "unzip"
+                            unzip "$ARCHIVE_NAME"
+                            ;;
+                        *.tar.gz|*.tgz)
+                            tar -xzf "$ARCHIVE_NAME"
+                            ;;
+                        *.tar.bz2)
+                            tar -xjf "$ARCHIVE_NAME"
+                            ;;
+                        *.tar)
+                            tar -xf "$ARCHIVE_NAME"
+                            ;;
+                        *.7z)
+                            ensure_tool "7z" "p7zip"
+                            7z x "$ARCHIVE_NAME"
+                            ;;
+                    esac
+                    
+                    notify "Archive extracted!"
+                fi
+            fi
+        else
+            notify "Failed to download archive"
+        fi
+        ;;
+    
+    # Social media URLs (redirect to browser or specialized tools)
+    *twitter.com/*|*x.com/*|*instagram.com/*|*facebook.com/*|*reddit.com/*)
+        notify "Social media link detected"
+        
+        # Try to open in browser
+        if command_exists "termux-open-url"; then
+            termux-open-url "$URL"
+        elif command_exists "am"; then
+            am start -a android.intent.action.VIEW -d "$URL"
+        else
+            notify "Cannot open URL. Please install termux-api package."
+        fi
+        ;;
+    
+    # Generic URLs - try to download or open in browser
+    http://*|https://*)
+        notify "Generic URL detected"
+        
+        # Try to determine if it's a downloadable file by checking headers
+        if command_exists "curl"; then
+            CONTENT_TYPE=$(curl -sI "$URL" | grep -i "content-type" | awk '{print $2}')
+            CONTENT_DISPOSITION=$(curl -sI "$URL" | grep -i "content-disposition")
+            
+            # If content-disposition suggests download or content-type is not HTML
+            if [[ -n "$CONTENT_DISPOSITION" ]] || [[ "$CONTENT_TYPE" != *"text/html"* ]]; then
+                notify "Downloadable content detected. Downloading..."
+                
+                DOWNLOAD_DIR="$HOME/storage/downloads"
+                mkdir -p "$DOWNLOAD_DIR"
+                
+                cd "$DOWNLOAD_DIR" || exit 1
+                
+                if command_exists "wget"; then
+                    wget "$URL"
+                else
+                    curl -O "$URL"
+                fi
+                
+                notify "Download complete!"
+            else
+                # Open in browser
+                if command_exists "termux-open-url"; then
+                    termux-open-url "$URL"
+                elif command_exists "am"; then
+                    am start -a android.intent.action.VIEW -d "$URL"
+                else
+                    notify "Cannot open URL. Please install termux-api package."
+                fi
+            fi
+        else
+            # Fallback: try to open in browser
+            if command_exists "termux-open-url"; then
+                termux-open-url "$URL"
+            elif command_exists "am"; then
+                am start -a android.intent.action.VIEW -d "$URL"
+            else
+                notify "Cannot open URL. Please install termux-api package."
+            fi
+        fi
+        ;;
+    
+    # Unknown URL type
+    *)
+        notify "Unknown URL type. Attempting to open in browser..."
+        
+        if command_exists "termux-open-url"; then
+            termux-open-url "$URL"
+        elif command_exists "am"; then
+            am start -a android.intent.action.VIEW -d "$URL"
+        else
+            notify "Cannot open URL. Please install termux-api package."
+        fi
+        ;;
+esac
+
+exit 0
