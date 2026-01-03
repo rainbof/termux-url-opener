@@ -1,0 +1,188 @@
+#!/data/data/com.termux/files/usr/bin/bash
+set -euo pipefail
+download_yt_dir="/storage/emulated/0/Movies/yt-downloader"
+########################################
+# asociativni pole: host -> funkce
+########################################
+
+declare -A url_action=(
+    # tady dopisuj dalsi mapovani
+    # ["domena.tld"]="nazev_funkce"
+    ["youtube.com"]="yt-downloader"
+    ["m.youtube.com"]="yt-downloader"
+    ["youtu.be"]="yt-downloader"
+    ["dvojka.rozhlas.cz"]="yt-downloader"
+    ["mujrozhlas.cz"]="yt-rozhlas"
+)
+
+########################################
+# detekce typu parametru
+# vraci "url" nebo "file"
+########################################
+
+detect_arg_type() {
+    local input="${1:-}"
+
+    if [[ -z "${input}" ]]; then
+        return 1
+    fi
+
+    if [[ "${input}" == http://* || "${input}" == https://* ]]; then
+        printf '%s\n' "url"
+        return 0
+    fi
+
+    # jedno / a pak ne / (tedy /neco, ne //server)
+    if [[ "${input}" =~ ^/[^/].* ]]; then
+        printf '%s\n' "file"
+        return 0
+    fi
+
+    return 1
+}
+
+########################################
+# vyseknuti nazvu serveru z url
+# https://www.youtube.com/watch?... -> youtube.com
+########################################
+
+urlstrip() {
+    local url="${1:-}"
+    local host
+
+    # odriznout schema
+    url="${url#http://}"
+    url="${url#https://}"
+
+    # odriznout vse za prvnim /
+    host="${url%%/*}"
+
+    # odriznout port kdyz bude (napr. example.com:8080)
+    host="${host%%:*}"
+
+    # odriznout www. pokud tam je
+    host="${host#www.}"
+
+    printf '%s\n' "${host}"
+}
+
+########################################
+# akce pro jednotlive typy
+########################################
+
+yt-downloader() {
+    local url="${1:-}"
+
+    if [[ -z "${url}" ]]; then
+        printf '[yt-downloader] chyba: nepredana url\n' >&2
+        return 1
+    fi
+
+    if [[ -z "${download_yt_dir:-}" ]]; then
+        printf '[yt-downloader] chyba: promenna download_yt_dir neni nastavena\n' >&2
+        return 1
+    fi
+
+    # vytvor adresar pokud neni
+    mkdir -p "${download_yt_dir}"
+
+    printf '[yt-downloader] stahuju do: %s\n' "${download_yt_dir}"
+
+     yt-dlp \
+         --no-progress \
+         --no-playlist \
+         -x --audio-format mp3 --audio-quality 0 \
+         -o "${download_yt_dir}/%(title)s.%(ext)s" \
+         "${url}"
+    am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Movies/yt-downloader/
+ }
+
+handle_file() {
+    local path="${1:-}"
+    # zatim jen placeholder, at se to da pozdeji dopsat
+    printf '[file] %s\n' "${path}"
+}
+
+function yt-rozhlas() {
+local url="${1:-}"
+
+    if [[ -z "${url}" ]]; then
+        printf '[yt-rozhlas] chyba: nepredana url\n' >&2
+        return 1
+    fi
+
+    if [[ -z "${download_yt_dir:-}" ]]; then
+        printf '[yt-downloader] chyba: promenna download_yt_dir neni nastavena\n' >&2
+        return 1
+    fi
+
+    # vytvor adresar pokud neni
+    mkdir -p "${download_yt_dir}"
+                                                                                            printf '[yt-downloader] stahuju do: %s\n' "${download_yt_dir}"
+    
+											    yt-dlp \
+      --no-progress \
+      -x \
+      --audio-format mp3 \
+      --audio-quality 0 \
+      -o "${download_yt_dir}/%(playlist_index)03d - %(title)s.%(ext)s" \
+      "${url}"
+											    am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Movies/yt-downloader/
+}
+########################################
+# dispatcher pro jeden argument
+########################################
+
+process_arg() {
+    local arg="${1:-}"
+    local type
+    local host
+    local action
+
+    if ! type="$(detect_arg_type "${arg}")"; then
+        printf '[warn] nepodporovany vstup: %s\n' "${arg}" >&2
+        return 1
+    fi
+
+    case "${type}" in
+        url)
+            host="$(urlstrip "${arg}")"
+            action="${url_action[${host}]:-}"
+
+            if [[ -z "${action}" ]]; then
+                printf '[info] pro host %s neni definovana akce, nic nedelam\n' "${host}" >&2
+                return 0
+            fi
+
+            if ! declare -F -- "${action}" >/dev/null 2>&1; then
+                printf '[error] funkce %s neni definovana (host: %s)\n' "${action}" "${host}" >&2
+                return 1
+            fi
+
+            "${action}" "${arg}"
+            ;;
+
+        file)
+            handle_file "${arg}"
+            ;;
+    esac
+}
+
+########################################
+# main – projdi vsechny parametry
+########################################
+
+main() {
+    if [[ "$#" -eq 0 ]]; then
+        printf 'pouziti: %s <url|soubor> [...]\n' "${0##*/}" >&2
+        exit 1
+    fi
+
+    local a
+    for a in "$@"; do
+        process_arg "${a}"
+    done
+}
+
+main "$@"
+
